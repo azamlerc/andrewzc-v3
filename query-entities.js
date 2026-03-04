@@ -22,7 +22,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 console.log(`\n🔍 Semantic search: "${query}"${listFilter ? ` (filtered to: ${listFilter})` : ""}\n`);
 
-const { data } = await openai.embeddings.create({ model: "text-embedding-3-small", input: query });
+const { data } = await openai.embeddings.create({ model: "text-embedding-3-small", input: query, dimensions: 512 });
 const results  = await vectorSearch(data[0].embedding, { listFilter, limit });
 
 console.log("Rank  Score   Page             Name");

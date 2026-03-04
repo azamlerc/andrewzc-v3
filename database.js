@@ -167,7 +167,7 @@ export async function vectorSearch(queryVector, { listFilter = null, limit = 10 
     const pipeline = [
       {
         $vectorSearch: {
-          index: "wikiEmbedding",
+          index: "wikiEmbeddings",
           path:  "wikiEmbedding",
           queryVector,
           numCandidates: limit * 5,

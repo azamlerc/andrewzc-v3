@@ -1,7 +1,8 @@
 # andrewzc-v3
 
-Scripts for managing the andrewzc.net MongoDB database. The pattern: `update-entities.js`
-provides the plumbing; small scripts call into it with a query and a transform.
+Scripts for managing the andrewzc.net MongoDB database. All database operations are
+centralised in `database.js`; general-purpose functions live in `utilities.js`. Individual
+scripts import from these and contain only business logic, keeping them short and focused.
 
 ---
 
@@ -41,10 +42,6 @@ Usage: `node rekey.js <list-name> [--dryrun]`
 Copies the `city` field to `reference` for all entities in a given list.
 Usage: `node copy-city-to-reference.js <list-name>`
 
-### `link-props-to-pages.js`
-Inspects `props` keys on `cities` and `countries` entities, finds matching pages, and sets
-`propertyOf` on those pages. One-time migration but safe to re-run.
-
 ---
 
 ## Properties
@@ -59,6 +56,17 @@ Takes all entities from a "detail list" (e.g. `metro-prices`) and merges them as
 into a "main list" (e.g. `metros`), keyed by entity name. Handles parenthetical sub-names,
 badges, strike-through, and array accumulation.
 Usage: `node merge-list-to-props.js <main-list> <detail-list> [--dryrun]`
+
+### `update-page-props.js`
+Introspects the `props` objects across all entities in a list and writes a schema summary
+to the matching page document. For each props key, records the JS type (`"boolean"`,
+`"number"`, `"string"`, `"prefix"`). Object sub-keys are documented as `key.subkey`;
+`strike` and `icons` are ignored as display-only. Safe to re-run — overwrites on each pass.
+Usage: `node update-page-props.js <list-name>`
+
+### `link-props-to-pages.js`
+Inspects `props` keys on `cities` and `countries` entities, finds matching pages, and sets
+`propertyOf` on those pages. One-time migration but safe to re-run.
 
 ### `copy-prefix-to-props.js`
 Copies `prefix` → `props.speed` for `high-speed` entities. Good example of the ideal
@@ -112,4 +120,3 @@ Usage: `node query-entities.js <query> [list-filter] [limit]`
 
 ### `completion-stats.js`
 Prints a table of completion percentages (visited/total) per page, sorted by % done.
-# andrewzc-v3

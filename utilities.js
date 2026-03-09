@@ -54,6 +54,97 @@ export function formatCoords({ lat, lon }) {
   return `${lat}, ${lon}`;
 }
 
+// ---- key computation ----
+
+/**
+ * Compute the entity key from its fields and the page's tags.
+ * Rules:
+ *   - country-key tag:    "name CC" (unless name contains a comma)
+ *   - reference-key tag:  "name reference" or "reference name" (if reference-first)
+ *   - default:            simplify(name)
+ */
+export function computeKey({ name, reference, country }, pageTags = []) {
+  const referenceKey   = pageTags.includes("reference-key");
+  const referenceFirst = pageTags.includes("reference-first");
+  const countryKey     = pageTags.includes("country-key");
+  const cc = country ? String(country).toUpperCase() : null;
+  if (countryKey && cc && !String(name).includes(",")) return simplify(`${name} ${cc}`);
+  if (referenceKey && reference) return simplify(referenceFirst ? `${reference} ${name}` : `${name} ${reference}`);
+  return simplify(name);
+}
+
+// ---- flag / country helpers ----
+
+// Map of ISO 3166-1 alpha-2 country codes to flag emoji.
+// The flag emoji for country code XX is the regional indicator
+// symbols for X and X: 0x1F1E6 + (charCode - 65).
+export function countryCodeToFlagEmoji(code) {
+  const upper = code.toUpperCase();
+  if (!/^[A-Z]{2}$/.test(upper)) return null;
+  return [...upper]
+    .map(c => String.fromCodePoint(0x1F1E6 + c.charCodeAt(0) - 65))
+    .join("");
+}
+
+/**
+ * Given a flag emoji (two regional indicator symbols), return the
+ * ISO 3166-1 alpha-2 country code, or null if it's not a flag emoji.
+ */
+export function flagEmojiToCountryCode(emoji) {
+  if (!emoji) return null;
+  const codePoints = [...emoji].map(c => c.codePointAt(0));
+  if (codePoints.length !== 2) return null;
+  if (!codePoints.every(cp => cp >= 0x1F1E6 && cp <= 0x1F1FF)) return null;
+  return codePoints.map(cp => String.fromCharCode(cp - 0x1F1E6 + 65)).join("");
+}
+
+/**
+ * Extract all country codes from an icons array.
+ * Returns an array of uppercase ISO alpha-2 codes.
+ */
+export function countryCodesFromIcons(icons = []) {
+  return icons.map(flagEmojiToCountryCode).filter(Boolean);
+}
+
+// ---- geo / city lookup ----
+
+/**
+ * Find the nearest city within radiusKm kilometres of the given location.
+ * Requires a MongoDB collection handle for the entities collection.
+ * Returns the city name string, or null if none found within the radius.
+ *
+ * @param {{ lat: number, lon: number } | { type: string, coordinates: number[] }} location
+ * @param {Collection} entitiesCollection  — MongoDB collection handle
+ * @param {number} radiusKm               — search radius in kilometres (default 20)
+ */
+export async function findNearestCity(location, entitiesCollection, radiusKm = 20) {
+  // Accept either { lat, lon } or GeoJSON Point
+  let geoPoint;
+  if (location.type === "Point") {
+    geoPoint = location;
+  } else {
+    geoPoint = { type: "Point", coordinates: [location.lon, location.lat] };
+  }
+
+  const results = await entitiesCollection
+    .find(
+      {
+        list: "cities",
+        location: {
+          $nearSphere: {
+            $geometry: geoPoint,
+            $maxDistance: radiusKm * 1000, // metres
+          },
+        },
+      },
+      { projection: { name: 1, _id: 0 } }
+    )
+    .limit(1)
+    .toArray();
+
+  return results[0]?.name ?? null;
+}
+
 // ---- internal ----
 
 const isCleanDecimal = (s) => /^-?\d+(?:\.\d+)?$/.test(s);

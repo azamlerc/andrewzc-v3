@@ -101,7 +101,11 @@ async function fetchWikiSummary(url) {
   const extract = Object.values(data.query?.pages ?? {})[0]?.extract;
   if (!extract) return { summary: null };
 
-  const summary = extract.split("\n").filter(p => p.trim().length > 50).slice(0, 3).join(" ") || null;
+  const summary = extract.split("\n")
+    .filter(p => p.trim().length > 50)
+    .filter(p => !/<[a-z]/i.test(p))   // drop paragraphs containing HTML tags
+    .filter(p => !/^[^a-zA-Z]*$/.test(p))  // drop paragraphs with no letters at all
+    .slice(0, 3).join(" ") || null;
   return { summary };
 }
 

@@ -260,7 +260,19 @@ function coordsFromAirbnb(html) {
 
 // ─── Main entry point ──────────────────────────────────────────────────────────
 
-let rateLimited = false;
+const INTER_REQUEST_DELAY_MS = 1_000;  // pause between Wikipedia fetches
+
+let lastWikipediaFetch = 0;
+
+async function throttledWikipediaFetch(url) {
+  const now = Date.now();
+  const elapsed = now - lastWikipediaFetch;
+  if (elapsed < INTER_REQUEST_DELAY_MS) {
+    await new Promise(r => setTimeout(r, INTER_REQUEST_DELAY_MS - elapsed));
+  }
+  lastWikipediaFetch = Date.now();
+  return loadWikipediaContent(url);
+}
 
 /**
  * Fetch coordinates from a URL.
@@ -302,31 +314,15 @@ export async function getCoordsFromUrl(url, { list = "" } = {}) {
     return null;
   }
 
-  if (rateLimited) {
-    // Back off and retry once before giving up
-    console.warn(`Wikipedia rate limited — waiting 60s before retrying...`);
-    await new Promise(r => setTimeout(r, 60_000));
-    rateLimited = false;
-  }
-
   let content;
   try {
-    content = await loadWikipediaContent(url);
+    content = await throttledWikipediaFetch(url);
   } catch (err) {
     if (err.rateLimited) {
-      rateLimited = true;
-      console.warn(`Rate limited on ${url} — waiting 60s then retrying...`);
-      await new Promise(r => setTimeout(r, 60_000));
-      rateLimited = false;
-      try {
-        content = await loadWikipediaContent(url);
-      } catch (err2) {
-        if (err2.rateLimited) rateLimited = true;
-        return null;
-      }
-    } else {
-      return null;
+      console.warn(`Rate limited on ${url} — aborting Wikipedia requests.`);
+      throw err; // re-throw so callers can set wikiBlocked
     }
+    return null;
   }
 
   if (!content) {
@@ -434,8 +430,8 @@ export async function getCoordsFromUrl(url, { list = "" } = {}) {
 }
 
 /**
- * Reset the rate-limit flag (useful if running across batches with a delay).
+ * Reset the inter-request throttle timer (useful between separate batch runs).
  */
 export function resetRateLimit() {
-  rateLimited = false;
+  lastWikipediaFetch = 0;
 }

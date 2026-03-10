@@ -1,8 +1,7 @@
-// Find entities that have a link to Wikipedia, Booking.com or Airbnb but no
-// coords/location, then attempt to fetch coordinates and save them.
+// Set coords and location from a Wikipedia, Booking.com, or Airbnb link.
 //
 // Usage:
-//   node find-location.js [list]  [--dryrun] [--retry] [--test]
+//   node set-coords-from-link.js [list]  [--dryrun] [--retry] [--test]
 //
 // Options:
 //   list      Restrict to a single list (optional)
@@ -93,7 +92,7 @@ if (testMode) {
   const maxList  = Math.max(...sorted.map(([l]) => l.length));
   const total    = sorted.reduce((s, [, n]) => s + n, 0);
 
-  console.log("=== find-location --test: entities needing coords ===\n");
+  console.log("=== set-coords-from-link --test: entities needing coords ===\n");
   for (const [list, count] of sorted) {
     const suffix = count < 5 ? `  — ${keysByList[list].join(", ")}` : "";
     console.log(`  ${list.padEnd(maxList)}  ${String(count).padStart(4)}${suffix}`);
@@ -154,7 +153,7 @@ for (const entity of eligible) {
 // ─── Summary ──────────────────────────────────────────────────────────────────
 
 console.log(`
-=== find-location summary ===
+=== set-coords-from-link summary ===
 Eligible:   ${eligible.length}
 Found:      ${found}
 Not found:  ${notFound}  ${notFound > 0 ? '(coords set to "not-found"; use --retry to attempt again)' : ""}

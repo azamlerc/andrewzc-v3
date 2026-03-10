@@ -16,6 +16,14 @@
 //   "null"/empty → null (nulls are stripped and don't overwrite existing fields).
 // - Dot-notation CSV headers expand to nested objects:
 //     props.bumper  →  { props: { bumper: true } }
+// - JSON can also be a key→entity object (legacy andrewzc.net format). Keys are
+//   ignored (recomputed); the "--info--" metadata entry is skipped automatically.
+// - If the page is tagged "no-coords" or "people", coord fetching and city/reference
+//   derivation from location are skipped entirely.
+// - For new entities, `been` defaults to false if not explicitly set. Set been=true
+//   (or "true"/"1" in CSV) to mark an entity as visited.
+// - If `coords` is supplied, it is normalised (DMS, degree symbols, directional
+//   suffixes all accepted) and `location` GeoJSON is (re)built from it.
 
 import "dotenv/config";
 import { MongoClient } from "mongodb";
@@ -27,6 +35,8 @@ import {
   countryCodeToFlagEmoji,
   countryCodesFromIcons,
   findNearestCity,
+  parseCoords,
+  formatCoords,
 } from "./utilities.js";
 import { getCoordsFromUrl } from "./wiki.js";
 
@@ -68,7 +78,17 @@ const raw = readFileSync(filePath, "utf8");
 
 if (ext === ".json") {
   const parsed = JSON.parse(raw);
-  rows = Array.isArray(parsed) ? parsed : [parsed];
+  if (Array.isArray(parsed)) {
+    rows = parsed;
+  } else if (typeof parsed === "object" && parsed !== null) {
+    // Legacy key→entity object format (e.g. old andrewzc.net data files).
+    // Keys are ignored (recomputed); the "--info--" metadata entry is skipped.
+    rows = Object.entries(parsed)
+      .filter(([k]) => k !== "--info--")
+      .map(([, v]) => v);
+  } else {
+    rows = [parsed];
+  }
 } else {
   const csvRows = parse(raw, { columns: true, skip_empty_lines: true, trim: true });
   rows = csvRows.map(row => {
@@ -176,7 +196,7 @@ for (const row of rows) {
 
   // Enrich: find Wikipedia link if not supplied and not already in DB
   if (!doc.link && !existing?.link) {
-    const searchName = doc.reference ? `${doc.name} ${doc.reference}` : doc.name;
+    const searchName = doc.name;
     const found = await searchWikipediaLink(searchName);
     if (found) {
       doc.link = found;
@@ -184,10 +204,24 @@ for (const row of rows) {
     }
   }
 
+  // Normalise any coords supplied in the input: parse (handles DMS, degree symbols,
+  // directional suffixes) and reformat as canonical decimal string; rebuild GeoJSON.
+  const skipCoords = tags.includes("no-coords") || tags.includes("people");
+  if (!skipCoords && doc.coords) {
+    const parsed = parseCoords(doc.coords);
+    if (parsed) {
+      doc.coords   = formatCoords(parsed);
+      doc.location = { type: "Point", coordinates: [parsed.lon, parsed.lat] };
+    } else {
+      warnings.push(`[${list}] "${doc.name}" — could not parse coords: "${doc.coords}"`);
+      delete doc.coords;
+    }
+  }
+
   // Enrich: fetch coords if not supplied and not already in DB
   const hasCoords = doc.coords || (existing?.coords && existing.coords !== "not-found");
   const linkToFetch = doc.link ?? existing?.link;
-  if (!hasCoords && linkToFetch && /wikipedia\.org|booking\.com|airbnb\.com/.test(linkToFetch)) {
+  if (!skipCoords && !hasCoords && linkToFetch && /wikipedia\.org|booking\.com|airbnb\.com/.test(linkToFetch)) {
     const result = await getCoordsFromUrl(linkToFetch, { list });
     if (result) {
       doc.coords   = result.coords;
@@ -200,7 +234,7 @@ for (const row of rows) {
 
   // Enrich: find nearest city from location (if we now have one)
   const locationForCity = doc.location ?? existing?.location;
-  if (locationForCity && !doc.city && !existing?.city) {
+  if (!skipCoords && locationForCity && !doc.city && !existing?.city) {
     const city = await findNearestCity(locationForCity, col);
     if (city) {
       doc.city = city;
@@ -227,6 +261,11 @@ for (const row of rows) {
     doc.key = computeKey(doc, tags);
   }
 
+  // Default been to false for new entities if not explicitly set
+  if (doc.been == null && !existing) {
+    doc.been = false;
+  }
+
   // Upsert
   const result = await col.updateOne(
     { key, list },
@@ -234,8 +273,16 @@ for (const row of rows) {
     { upsert: true }
   );
 
-  if (result.upsertedCount)      inserted++;
-  else if (result.modifiedCount) updated++;
+  const icons = Array.isArray(doc.icons) ? doc.icons.join(" ") : (doc.icons ?? "");
+  const label = [icons, doc.name].filter(Boolean).join(" ");
+
+  if (result.upsertedCount) {
+    inserted++;
+    console.log(`added   ${label}`);
+  } else if (result.modifiedCount) {
+    updated++;
+    console.log(`updated ${label}`);
+  }
   // matchedCount but modifiedCount=0 means doc was identical, still counts as ok
 }
 

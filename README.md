@@ -63,10 +63,13 @@ Usage: `node upsert-entities.js <file.json|file.csv> [--dryrun]`
 For CSV input, use dot-notation headers for nested fields (`props.year`, `icons.0`). Column
 order is preserved; `--dryrun` prints what would be upserted without writing anything.
 
+JSON can also be a key→entity object (the legacy andrewzc.net data format). Keys are
+ignored since they are recomputed; the `--info--` metadata entry is skipped automatically.
+
 See `upsert-workflow.md` in the context repo for the full workflow guide.
 
 ### `wiki.js`
-Module (not a standalone script) used by `upsert-entities.js` and `find-location.js` to
+Module (not a standalone script) used by `upsert-entities.js` and `set-coords-from-link.js` to
 fetch coordinates from entity links. Dispatches by host:
 - **Wikipedia** — cascade of seven strategies: `{{coord}}` template, river mouth
   handling, `latitude=`/`longitude=` infobox fields, German `breitengrad`/`längengrad`
@@ -75,19 +78,28 @@ fetch coordinates from entity links. Dispatches by host:
 - **Booking.com** — regex on `center=lat,lon` in URL
 - **Airbnb** — regex on `"lat":...,"lng":...` in page source
 
-Handles Wikipedia 429 rate limiting (waits 60 s, retries once). Returns `{ coords, location }`.
+Throws a `{ rateLimited: true }` error on a 429 so callers can stop immediately and
+continue with non-Wikipedia steps. Returns `{ coords, location }`.
 
-### `find-location.js`
+### `set-coords-from-link.js`
 Batch-fetches missing coordinates for existing entities that have a Wikipedia, Booking.com,
 or Airbnb link. Skips pages tagged `no-coords`. Marks failed lookups with `coords: "not-found"`
 to avoid re-attempting them on future runs.
 
-Usage: `node find-location.js [list-name] [--dryrun] [--retry] [--test]`
+Usage: `node set-coords-from-link.js [list-name] [--dryrun] [--retry] [--test]`
 
 - Omit `list-name` to process all eligible entities
 - `--retry` also attempts entities previously marked `"not-found"`
 - `--test` reports only — buckets eligible entities by list without writing anything
 - `--dryrun` shows what would be written without committing
+
+### `enrich-list.js`
+Runs the full enrichment pipeline (link → coords → city → reference) for all entities in a
+list that are missing any of those fields. Each step only runs if its prerequisite is
+present and the target field is absent. On a Wikipedia rate limit, skips remaining
+Wikipedia requests but continues to set city and reference from already-present data.
+
+Usage: `node enrich-list.js <list>`
 
 ---
 
@@ -98,10 +110,6 @@ Regenerates `key` values for all entities in a list based on the page's tags
 (`reference-key`, `reference-first`, `country-key`). Now delegates to `computeKey()`
 in `utilities.js`. Accepts `--dryrun`.
 Usage: `node rekey.js <list-name> [--dryrun]`
-
-### `copy-city-to-reference.js`
-Copies the `city` field to `reference` for all entities in a given list.
-Usage: `node copy-city-to-reference.js <list-name>`
 
 ---
 
@@ -118,11 +126,29 @@ Audits all pages tagged `reference` for entities with a missing or blank referen
 Auto-fixes cases where `city` is set (copies it to `reference`); prints the rest for
 manual attention.
 
-### `get-reference-from-name.js`
+### `set-link-from-name.js`
+Searches Wikipedia for each entity's name and sets the `link` field. Only processes
+entities with no existing link. Skips pages tagged `people` (name-only search is
+unreliable for people). Stops cleanly on a rate limit.
+Usage: `node set-link-from-name.js <list-name>`
+
+### `set-coords-from-link.js`
+See the [Entity Upsert Pipeline](#entity-upsert-pipeline) section above.
+
+### `set-city-from-coords.js`
+Sets the `city` field via a `$nearSphere` lookup for entities that have a `location` but
+no `city`.
+Usage: `node set-city-from-coords.js <list-name>`
+
+### `set-reference-from-city.js`
+Copies the `city` field to `reference` for all entities in a given list that have a city.
+Usage: `node set-reference-from-city.js <list-name>`
+
+### `set-reference-from-name.js`
 Extracts the first word of each entity's `name` as the `reference` field and strips it
 from the name. Used to clean up list-prefixed entity names (e.g. driverless metro lines
 stored as `"Tokyo Yurikamome"` → `reference: "Tokyo"`, `name: "Yurikamome"`).
-Usage: `node get-reference-from-name.js <list-name>`
+Usage: `node set-reference-from-name.js <list-name>`
 
 ---
 
@@ -227,6 +253,25 @@ Converts string prop values to numbers for all entities in a list. Handles negat
 numbers, dollar signs (`$4.22` → `4.22`), K suffix (`150K` → `150000`), and M suffix
 (`1.23M` → `1230000`). Updates the page schema replacing `"string"` with `"number"`.
 Usage: `node make-prop-numeric.js <list-name> <prop>`
+
+---
+
+## Website Maintenance
+
+### `check-pages.js`
+Compares static `.html` pages against their dynamic equivalents served by the local dev
+server, and upgrades matching links in a category page. For each static link found in the
+category file, it fetches both versions, extracts the `<div class="items">` content, and
+reports whether they are identical or how many lines differ.
+
+Usage: `node check-pages.js <category> [--fix] [--base=http://localhost/andrewzc]`
+
+- `<category>` can be a bare name (`trains`), a name with extension (`trains.html`), or a
+  full/relative path — bare names are resolved from the sibling `andrewzc.net` directory
+- Omit `--fix` for a dry run — reports only, no files modified
+- `--fix` rewrites identical links from `<page>.html` to `page.html?id=<page>` in place
+- `--base` overrides the local server URL (default: `http://localhost/andrewzc`)
+- Pages with no `.items` div in the dynamic version are flagged as errors (not yet in DB)
 
 ---
 

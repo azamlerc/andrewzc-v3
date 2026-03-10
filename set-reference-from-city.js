@@ -1,12 +1,12 @@
-// Copy city field to reference field for entities in a list.
-// Usage: node copy-city-to-reference.js <list-name>
+// Set reference field from city field for entities in a list.
+// Usage: node set-reference-from-city.js <list-name>
 
 import { processEntities } from "./database.js";
 
 const listName = process.argv[2];
 
 if (!listName) {
-  console.error("Usage: node copy-city-to-reference.js <list-name>");
+  console.error("Usage: node set-reference-from-city.js <list-name>");
   process.exit(1);
 }
 

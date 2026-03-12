@@ -9,13 +9,14 @@ export function simplify(s) {
   return String(s || "")
     .toLowerCase()
     .replace(/ /g, "-")
-    .replace(/['']/g, "")
-    .replace(/\./g, "")
-    .replace(/,/g, "")
-    .replace(/[*"<>()/&–—]/g, "-")
-    .replace(/---/g, "-")
+    .replace(/[''\u2018\u2019\u201c\u201d]/g, "")  // straight + curly quotes
+    .replace(/[()]/g, "")                          // parentheses: strip, not hyphenate
+    .replace(/[.,]/g, "")
+    .replace(/[*"<>/&\u2013\u2014]/g, "-")         // separators → hyphen
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")               // strip diacritics
+    .replace(/-+/g, "-")                           // collapse multiple hyphens
+    .replace(/^-+|-+$/g, "")                       // trim leading/trailing hyphens
     .replace(/^the-/, "");
 }
 
@@ -115,9 +116,9 @@ export function countryCodesFromIcons(icons = []) {
  *
  * @param {{ lat: number, lon: number } | { type: string, coordinates: number[] }} location
  * @param {Collection} entitiesCollection  — MongoDB collection handle
- * @param {number} radiusKm               — search radius in kilometres (default 20)
+ * @param {number} radiusKm               — search radius in kilometres (default 30)
  */
-export async function findNearestCity(location, entitiesCollection, radiusKm = 20) {
+export async function findNearestCity(location, entitiesCollection, radiusKm = 30) {
   // Accept either { lat, lon } or GeoJSON Point
   let geoPoint;
   if (location.type === "Point") {
